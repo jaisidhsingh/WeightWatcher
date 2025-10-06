@@ -223,6 +223,7 @@ SOURCE = 'source'
 PYTORCH = 'pytorch'
 PYSTATEDICT = 'pystatedict'
 ONNX = 'onnx'
+JAX = 'jax'
 WW_FLATFILES = "ww_flatfiles"
 PYTORCH = "pytorch"
 SAFETENSORS = "safetensors"
@@ -245,6 +246,7 @@ class FRAMEWORK():
     PYTORCH = 'pytorch'
     KERAS = 'keras'
     ONNX = 'onnx'
+    JAX = 'jax'
     PYSTATEDICT = 'pystatedict'
     PYSTATEDICT_DIR = 'pystatedict_dir'
     WW_FLATFILES = WW_FLATFILES

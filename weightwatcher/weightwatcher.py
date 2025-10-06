@@ -20,6 +20,7 @@ import tempfile
 #from deprecated import deprecated
 import inspect
 
+from flax import nnx
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -273,9 +274,123 @@ class KerasLayer(FrameworkLayer):
                 yield from traverse_(layer)
 
         return layer_iter_() 
-    
 
-      
+
+
+class JaxLayer(FrameworkLayer):
+    
+    def __init__(self, layer, layer_id, name=None, longname=None):
+        the_type = self.layer_type(layer)
+        channels = CHANNELS.LAST
+        FrameworkLayer.__init__(self, layer, layer_id, name, longname=longname,
+            the_type=the_type, framework=FRAMEWORK.JAX, channels=channels
+        )
+    
+    def layer_type(self, layer):
+        the_type = LAYER_TYPE.UNKNOWN
+        typestr = (str(type(layer))).lower()
+
+        if isinstance(layer, nnx.Linear) or 'linear' in typestr:
+            the_type = LAYER_TYPE.DENSE
+        
+        elif isinstance(layer, nnx.Conv1d) or 'conv1d' in typestr:
+            the_type = LAYER_TYPE.CONV1D
+        
+        elif isinstance(layer, nnx.Conv2d) or 'conv2d' in typestr:
+            the_type = LAYER_TYPE.CONV2D
+        
+        elif isinstance(layer, nnx.Embed) or 'embed' in typestr:
+            the_type = LAYER_TYPE.EMBEDDING
+        
+        elif 'norm' in str(type(layer)).lower():
+            the_type = LAYER_TYPE.NORM
+        
+        return the_type
+    
+    def has_biases(self):
+        return hasattr(self.layer, "bias")
+    
+    def get_weights_and_biases(self):
+        """Extract the original weights (as a tensor) for the layer, and biases for the layer, if present
+
+        expects self.layer to be set
+        """
+
+        has_weights, has_biases = False, False
+        weights, biases = None, None
+
+        if hasattr(self.layer, 'kernel'):
+            w = [np.array(self.layer.kernel.value)]
+
+            if self.the_type==LAYER_TYPE.CONV2D:
+                weights = w[0]
+                biases = None
+                has_weights = True
+            elif self.the_type==LAYER_TYPE.CONV1D:
+                weights = w[0]
+                biases = None
+                has_weights = True
+            elif self.the_type==LAYER_TYPE.EMBEDDING:
+                # For Embed layers, the weight is stored in 'embedding' attribute
+                if hasattr(self.layer, 'embedding'):
+                    weights = np.array(self.layer.embedding.value)
+                else:
+                    weights = w[0]
+                biases = None
+                has_weights = True
+            elif self.the_type==LAYER_TYPE.DENSE:
+                weights = w[0]
+                has_weights = True
+
+                biases = None
+                has_biases = False
+                if self.has_biases():
+                    biases = np.array(self.layer.bias.value)
+                    has_biases = True
+
+
+            elif self.the_type not in [LAYER_TYPE.NORM]:
+                logger.info("jax layer: {}  type {} not found ".format(str(self.layer),str(self.the_type)))
+            else:
+                pass
+
+        return has_weights, weights, has_biases, biases
+
+
+    def replace_layer_weights(self, W, B=None):
+        """Replace the layer weights with new values"""
+        if hasattr(self.layer, 'kernel'):
+            self.layer.kernel.value = W
+        if self.has_biases() and B is not None:
+            self.layer.bias.value = B
+
+
+
+    @staticmethod
+    def get_layer_iterator(model, start_id=0):
+        """Iterate over Flax.nnx model layers
+
+        start_id is 0 for back compatibility
+        """
+        def layer_iter_():
+            layer_id = start_id
+            # Get the graph nodes from the model
+            graphdef, state = nnx.split(model)
+
+            # Iterate through the model's submodules
+            for path, module in nnx.iter_graph(model):
+                if len(path) == 0:
+                    continue  # Skip the root module
+
+                longname = '.'.join(str(p) for p in path)
+                setattr(module, 'longname', longname)
+                jax_layer = JaxLayer(module, layer_id, longname=longname)
+                layer_id += 1
+                yield jax_layer
+        return layer_iter_()
+
+
+
 class PyTorchLayer(FrameworkLayer):
     
     def __init__(self, layer, layer_id, name=None, longname = None):
